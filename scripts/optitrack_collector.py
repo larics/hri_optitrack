@@ -29,6 +29,11 @@ class OptitrackCollector:
 
         self.rate = rospy.Rate(10)
 
+       # Initialize all the subscribers
+        self._init_subscribers()
+
+    def _init_subscribers(self):
+
         # Subscribe to the geometry_msgs/Pose topic
         rospy.Subscriber('your_pose_topic', Pose, self.pose_callback)
 
@@ -37,6 +42,9 @@ class OptitrackCollector:
 
         # Subscribe to the moveit_msgs/CollisionObject topic
         rospy.Subscriber('/collision_object_topic', CollisionObject, self.collision_object_callback)
+
+        # Subscribe to the /create_object topic
+        rospy.Subscriber('/create_object', CreateObject, self.create_object_callback)
 
 
     def pose_callback(self, msg):
