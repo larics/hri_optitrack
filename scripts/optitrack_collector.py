@@ -4,6 +4,9 @@ import rospy
 from geometry_msgs.msg import Pose
 from std_msgs.msg import Bool
 from your_package_name.msg import CreateObject  # Import the CreateObject message
+from moveit_msgs.msg import CollisionObject  # Import the CollisionObject message
+from shape_msgs.msg import SolidPrimitive  # Import the SolidPrimitive message
+
 
 class OptitrackCollector:
     def __init__(self):
@@ -31,6 +34,10 @@ class OptitrackCollector:
 
         # Subscribe to the enable_collection flag topic
         rospy.Subscriber('/enable_collection', Bool, self.enable_collection_callback)
+
+        # Subscribe to the moveit_msgs/CollisionObject topic
+        rospy.Subscriber('/collision_object_topic', CollisionObject, self.collision_object_callback)
+
 
     def pose_callback(self, msg):
         if self.collection_enabled:

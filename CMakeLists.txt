@@ -6,6 +6,8 @@ find_package(catkin REQUIRED COMPONENTS
   rospy
   geometry_msgs
   std_msgs
+  shape_msgs
+  moveit_msgs
   message_generation  # Add message_generation here
 )
 
@@ -24,7 +26,7 @@ generate_messages(
 
 ## Declare a catkin package
 catkin_package(
-  CATKIN_DEPENDS rospy geometry_msgs std_msgs message_runtime  # Add message_runtime here
+  CATKIN_DEPENDS rospy geometry_msgs shape_msgs moveit_msgs std_msgs message_runtime  # Add message_runtime here
 )
 
 ## Build the nodes
