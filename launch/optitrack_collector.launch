@@ -1,0 +1,6 @@
+<launch>
+  <!-- Start the pose collector node -->
+  <node name="pose_collector_node" pkg="hri_optitrack" type="optitrack_collector.py" output="screen">
+    <!-- Add any necessary arguments here -->
+  </node>
+</launch>
