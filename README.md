@@ -12,3 +12,12 @@ To launch the Optitrack Collector node, follow these steps:
 ```
 git clone https://github.com/your-username/hri_optitrack
 ```
+
+## Questions 
+
+What's the difference between following ROS topics: 
+```
+/kdno/INST_POINT
+/vrpn_client_node/INST_POINT/pose 
+```
+
