@@ -5,6 +5,7 @@ project(hri_optitrack)
 find_package(catkin REQUIRED COMPONENTS
   rospy
   geometry_msgs
+  sensor_msgs
   std_msgs
   shape_msgs
   moveit_msgs
@@ -22,6 +23,9 @@ generate_messages(
   DEPENDENCIES
   geometry_msgs
   std_msgs
+  sensor_msgs
+  shape_msgs
+  moveit_msgs
 )
 
 ## Declare a catkin package
