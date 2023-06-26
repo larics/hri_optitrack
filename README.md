@@ -21,3 +21,9 @@ What's the difference between following ROS topics:
 /vrpn_client_node/INST_POINT/pose 
 ```
 
+## TODO: 
+
+- [ ] Add dimensions for the first shape (rectangle) 
+- [ ] Add service call for creating obstacle in env 
+- [ ] Check necessary transformations for putting stuff in robot coordinate frame 
+- [ ] Add specification of the plane only by points 

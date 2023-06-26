@@ -31,6 +31,9 @@ class OptitrackCollector:
         self.create_object_sub_name = "/create_object"
         self._init_subscribers()
 
+        #self.MODE = "points"
+        self.MODE = "plane"
+
     def _init_subscribers(self):
 
         # Subscribe to the geometry_msgs/Pose topic
@@ -56,7 +59,10 @@ class OptitrackCollector:
             self.pose_dict['position_z'].append(msg.pose.position.z)
             # TODO: Add orientation
             if self.collection_completed:
-                self.create_object(self.pose_dict)
+                if self.MODE == "plane":
+                    self.create_object_plane(self.pose_dict)
+                if self.MODE == "point": 
+                    self.create_plane_points(self.pose_dict)
             
 
     def enable_collection_callback(self, msg):
@@ -68,7 +74,7 @@ class OptitrackCollector:
         elif msg.buttons[0] == 0: 
             self.collection_completed = True
 
-    def create_object(self, pose_dict):
+    def create_object_plane(self, pose_dict):
 
         # Find the minimum and maximum values of the position measurements
         min_position_x = round(min(pose_dict['position_x']), 4)
@@ -93,6 +99,11 @@ class OptitrackCollector:
         rospy.logdebug("Calling create obstacle function: {} {} {}".format(origin_x, origin_y, origin_z))
         self.collection_completed = False
         self.collection_enabled = False
+
+    def create_plane_points(self, p1, p2, p3): 
+
+        # TODO: Specify rectangle by 3 points 
+        pass 
 
 
 
