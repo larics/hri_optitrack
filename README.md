@@ -13,6 +13,12 @@ To launch the Optitrack Collector node, follow these steps:
 git clone https://github.com/your-username/hri_optitrack
 ```
 
+## Setup ROS master to match UR PC
+```
+export ROS_MASTER_URI:=http://192.168.1.100:11311
+export ROS_IP:=192.168.1.50
+```
+
 ## Questions 
 
 What's the difference between following ROS topics: 

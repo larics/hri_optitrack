@@ -1,6 +1,7 @@
 <launch>
   <!-- Start the pose collector node -->
-  <node name="pose_collector_node" pkg="hri_optitrack" type="optitrack_collector.py" output="screen">
-    <!-- Add any necessary arguments here -->
-  </node>
+  <arg name="kalipen" value="true"/>
+  
+  <node ns="kalipen" name="ros_kalipen_node" pkg="ros_kalipen" type="joy_node.py" output="screen"></node>
+  <node name="pose_collector_node" pkg="hri_optitrack" type="optitrack_collector.py" output="screen"></node>
 </launch>
