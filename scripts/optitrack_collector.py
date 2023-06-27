@@ -3,6 +3,7 @@
 import sys 
 import rospy
 import moveit_commander
+import numpy as np
 from geometry_msgs.msg import PoseStamped, Vector3
 from std_msgs.msg import Bool
 from hri_optitrack.msg import CreateObject  # Import the CreateObject message
@@ -44,8 +45,11 @@ class OptitrackCollector:
         self._init_subscribers()
         self._init_services()
 
-        #self.MODE = "points"
-        self.MODE = "plane"
+        self.MODE = "points"
+        #self.MODE = "plane"
+        # Click counter
+        self.click = 0
+        self.A, self.B, self.C = np.array([]), np.array([]), np.array([])
 
         # Init moveit_commander
         moveit_commander.roscpp_initialize(sys.argv)
@@ -96,9 +100,16 @@ class OptitrackCollector:
             # TODO: Add orientation
             if self.collection_completed:
                 if self.MODE == "plane":
-                    self.create_object_plane(self.pose_dict)
-                if self.MODE == "point": 
-                    self.create_plane_points(self.pose_dict)
+                    origin, (l, w, h) = self.create_object_plane(self.pose_dict)
+                    self.add_box_to_planning_scene(origin, (l, w, h))
+                if self.MODE == "points": 
+                    origin, (l, w, h) = self.create_plane_points(self.pose_dict)
+                    if self.click == 4:
+                        rospy.logdebug("Adding plane to planning scene!") 
+                        #self.add_plane_to_planning_scene(origin, n, (l, w))
+                if self.MODE == "ransac": 
+                    origin, (l, w, h) = self.create_ransac_plane(self.pose_dict)
+                
             
 
     def enable_collection_callback(self, msg):
@@ -109,6 +120,7 @@ class OptitrackCollector:
             self.collection_enabled = True
         elif msg.buttons[0] == 0: 
             self.collection_completed = True
+            self.click += 1
 
     #### Service handlers ####
     def remove_objects_srv_handler(self, req):
@@ -138,6 +150,7 @@ class OptitrackCollector:
         rospy.logdebug("Maximum Position (X, Y, Z): ({}, {}, {})".format(max_x, max_y, max_z))
         rospy.logdebug("Origin of the collision primitive is: (X, Y, Z) {} {} {}".format(origin.x, origin.y, origin.z))
         rospy.logdebug("Dimensions of the (X, Y, Z): ")
+
         # Process the received data as needed
         # Call required service for object creation 
         #origin_pose = msg.origin
@@ -146,8 +159,47 @@ class OptitrackCollector:
 
         l, w, h = self.calculate_box_dim((min_x, min_y, min_z), (max_x, max_y, max_z))
 
-        self.add_object_to_planning_scene(origin, (l, w, h))
+        return origin, (l, w, h)
+    
+    def create_plane_points(self, pose_dict): 
+        """
+        Creates a plane from three points.
 
+        Args:
+            pose_dict (dict): Dictionary containing the pose data from the Optitrack system.
+
+        Returns:
+            origin (Vector3): The origin of the plane.
+            (l, w, h) (tuple): The dimensions of the plane.
+        """
+                
+        if self.click == 1:
+            self.B = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
+            rospy.logdebug("First click, first point: {}".format(self.A))
+        if self.click == 2:
+            self.A = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
+            rospy.logdebug("Second click, second point: {}".format(self.B))
+        if self.click == 3: 
+            self.C = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
+            rospy.logdebug("Third click, third point: {}".format(self.C))
+        if self.click == 4: 
+            n, d = self.get_plane_eq()
+            rospy.logdebug("Found normal is: {}".format(n))
+            rospy.logdebug("Found scalar is: {}".format(d))
+
+        # TODO: Return origin and normal of the plane 
+        # How to find origin of the plane (orientation of the plane)
+
+    def get_plane_eq(): 
+        # Get the normal of the plane
+        n = np.cross(self.B - self.A, self.C - self.B)
+        # Get the equation of the plane ax + by + cz + d = 0
+        d = np.dot(-n, self.A)
+        return n, d
+
+
+    def create_ransac_plane(self, pose_dict):
+        pass
 
     def calculate_box_dim(self, min_coords, max_coords):
         """
@@ -162,24 +214,11 @@ class OptitrackCollector:
             tuple: A tuple containing the dimensions (length, width, height) of the 3D box.
         """
         length = max_coords[0] - min_coords[0]
-        width = max_coords[1] - min_coords[1]
+        width  = max_coords[1] - min_coords[1]
         height = max_coords[2] - min_coords[2]
         return length, width, height
 
-    def make_box(self, name, pose, size): 
-        co = CollisionObject()
-        co.operation = CollisionObject.ADD
-        co.id = name
-        co.header = pose.header
-        box = SolidPrimitive()
-        box.type = SolidPrimitive.BOX
-        box.dimensions = list(size)
-        co.primitives = [box]
-        co.primitive_poses = [pose.pose]
-        return co 
-
-
-    def add_object_to_planning_scene(self, origin, size): 
+    def add_box_to_planning_scene(self, origin, size): 
 
         box_pose = PoseStamped()
         box_pose.header.frame_id = "world_opti"
@@ -190,27 +229,25 @@ class OptitrackCollector:
         box_name = "obstacle{}".format(self.num_added_objects+1)
         self.num_added_objects += 1
         self.scene.add_box(box_name, box_pose, size)
-        #co_ = self.make_box(box_name, box_pose, size)
-        #self.co_pub.publish(co_)
 
-
-    def create_plane_points(self, p1, p2, p3): 
-
-        # TODO: Specify rectangle by 3 points 
-        pass 
+    def add_plane_to_planning_scene(self, n, )
 
     #### Execution method ####
     def run(self):
         # Run the node until it is shutdown
         while not rospy.is_shutdown():
             self.rate.sleep()
-            if self.collection_completed:
+            if self.collection_completed and self.MODE == "plane":
                 attached_objects = self.scene.get_attached_objects()
                 objects = self.scene.get_objects()
                 rospy.loginfo("Attached objects are: {}".format(attached_objects))
                 rospy.loginfo("Objects are: {}".format(objects))
                 self.collection_completed = False
                 self.collection_enabled = False
+
+            if self.collection_completed and self.MODE == "points": 
+                if self.click == 4: 
+
 
 if __name__ == '__main__':
     collector = OptitrackCollector()
