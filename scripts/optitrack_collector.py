@@ -2,6 +2,7 @@
 
 import sys 
 import rospy
+import copy
 import moveit_commander
 import numpy as np
 from geometry_msgs.msg import PoseStamped, Vector3
@@ -10,8 +11,10 @@ from hri_optitrack.msg import CreateObject  # Import the CreateObject message
 from moveit_msgs.msg import CollisionObject, PlanningScene  # Import the CollisionObject message
 from shape_msgs.msg import SolidPrimitive  # Import the SolidPrimitive message
 from sensor_msgs.msg import Joy
-from std_srvs.srv import Trigger, TriggerRequest, TriggerResponse
-
+from std_srvs.srv import Trigger, TriggerResponse
+from visualization_msgs.msg import Marker
+from calc_utils import get_RotX, get_RotY, get_RotZ
+from scipy.spatial.transform import Rotation as R
 
 class OptitrackCollector:
     def __init__(self):
@@ -28,6 +31,7 @@ class OptitrackCollector:
         self.collection_enabled = False
         self.collection_completed = False
         self.kalipen_reciv = False
+        self.pose_reciv = False
         self.num_added_objects = 0
 
         # Initialize the ROS node
@@ -52,11 +56,20 @@ class OptitrackCollector:
         self.A, self.B, self.C = np.array([]), np.array([]), np.array([])
 
         # Init moveit_commander
-        moveit_commander.roscpp_initialize(sys.argv)
-        group_name = "manipulator"
-        #self.robot = moveit_commander.RobotCommander(group_name)
-        self.group = moveit_commander.MoveGroupCommander(group_name)
-        self.scene = moveit_commander.PlanningSceneInterface() # --> ns? 
+        self.moveit = False
+        if self.moveit:
+            moveit_commander.roscpp_initialize(sys.argv)
+            group_name = "manipulator"
+            #self.robot = moveit_commander.RobotCommander(group_name)
+            self.group = moveit_commander.MoveGroupCommander(group_name)
+            self.scene = moveit_commander.PlanningSceneInterface() # --> ns? 
+
+
+        self.v1, self.v2, self.v3 = Marker(), Marker(), Marker()
+
+
+        # TODO: Add visualization: 
+
     
     #### Initializers ####
     def _init_subscribers(self):
@@ -92,6 +105,7 @@ class OptitrackCollector:
 
     #### Topic callbacks ####
     def pose_callback(self, msg):
+        self.pose_reciv = True
         if self.collection_enabled and self.kalipen_reciv:
             # Append the measured values to the corresponding lists in the pose_dict
             self.pose_dict['position_x'].append(msg.pose.position.x)
@@ -103,13 +117,16 @@ class OptitrackCollector:
                     origin, (l, w, h) = self.create_object_plane(self.pose_dict)
                     self.add_box_to_planning_scene(origin, (l, w, h))
                 if self.MODE == "points": 
-                    origin, (l, w, h) = self.create_plane_points(self.pose_dict)
+                    self.create_plane_points(self.pose_dict)
                     if self.click == 4:
-                        rospy.logdebug("Adding plane to planning scene!") 
-                        #self.add_plane_to_planning_scene(origin, n, (l, w))
+                        # Plane representations 
+                        # https://ocw.mit.edu/ans7870/18/18.013a/textbook/HTML/chapter05/section04.html
+                        # Should add origin: 
+                        # origin, (l, w, h) = self.create_plane_points(self.pose_dict)
+                        self.add_plane_to_planning_scene(origin, n, (l, w))
                 if self.MODE == "ransac": 
                     origin, (l, w, h) = self.create_ransac_plane(self.pose_dict)
-                
+                    #TODO: Add O3D RANSAC 
             
 
     def enable_collection_callback(self, msg):
@@ -175,27 +192,104 @@ class OptitrackCollector:
                 
         if self.click == 1:
             self.B = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
-            rospy.logdebug("First click, first point: {}".format(self.A))
+            self.o = copy.deepcopy(self.B)
+            rospy.logdebug_once("First click, first point: {}".format(self.B))
         if self.click == 2:
             self.A = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
-            rospy.logdebug("Second click, second point: {}".format(self.B))
+            self.a = copy.deepcopy(self.A)
+            rospy.logdebug_once("Second click, second point: {}".format(self.A))
         if self.click == 3: 
             self.C = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
-            rospy.logdebug("Third click, third point: {}".format(self.C))
-        if self.click == 4: 
-            n, d = self.get_plane_eq()
-            rospy.logdebug("Found normal is: {}".format(n))
-            rospy.logdebug("Found scalar is: {}".format(d))
+            self.b = copy.deepcopy(self.C)
+            rospy.logdebug_once("Third click, third point: {}".format(self.C))
+
+
+        width = self.get_euclidean(self.o, self.a)
+        length = self.get_euclidean(self.o, self.b)
+
+        self.v1_ = self.a - self.o
+        self.v2_ = self.b - self.o
+
+        if self.visualize: 
+            self.v1 = self.create_vector_marker(self.o, self.a)
+            self.v1_unit = self.get_unit_vector(self.v1_)
+            self.v1_quat = self.get_quaternion(self.v1_unit)
+            self.v2 = self.create_vector_marker(self.o, self.b)
+            self.v2_unit = self.get_unit_vector(self.v2_)
+            self.v2_quat = self.get_quaternion(self.v2_unit)
+
 
         # TODO: Return origin and normal of the plane 
         # How to find origin of the plane (orientation of the plane)
 
-    def get_plane_eq(): 
+    def get_plane_eq(self): 
         # Get the normal of the plane
-        n = np.cross(self.B - self.A, self.C - self.B)
+        p_x = self.create_normalized_vector(self.o, self.a)
+        p_y = self.create_normalized_vector(self.o, self.b)
+        p_z = self.create_normalized_vector(np.cross(p_x, p_y))
+        T_plane = np.matrix([p_x.T, p_y.T, p_z.T, self.o.T])
+        print(T_plane)
+
+        # Get the normal of the plane
+        #n = np.cross(self.B - self.A, self.C - self.B)
         # Get the equation of the plane ax + by + cz + d = 0
-        d = np.dot(-n, self.A)
+        #d = np.dot(-n, self.A)
         return n, d
+    
+    def get_unit_vector(self, vector): 
+        return vector / np.linalg.norm(vector)
+    
+    def create_cs(self, vector): 
+        a = vector 
+        b = self.matmul(get_RotZ(-90), a)
+        c = self.matmul(a, b)
+        R_ = np.matrix([a, b, c])
+        r = R.from_matrix(R_)
+        return r.as_quat()
+    
+    def create_vector_marker(self, origin, quaternion):
+        marker = Marker()
+        marker.header.frame_id = "n_thorax"
+        marker.header.stamp = rospy.Time().now()
+        marker.ns = "arrow"
+        marker.id = 0
+        marker.type = Marker.ARROW
+        marker.action = Marker.ADD
+        marker.pose.position.x = origin.x
+        marker.pose.position.y = origin.y
+        marker.pose.position.z = origin.z
+        # How to transform x,y,z values to the orientation 
+        marker.pose.orientation.x = quaternion[0]
+        marker.pose.orientation.y = quaternion[1]
+        marker.pose.orientation.z = quaternion[2]
+        marker.pose.orientation.w = quaternion[3]
+        marker.scale.x = 0.25
+        marker.scale.y = 0.25
+        marker.scale.z = 0.25
+        marker.color.a = 1.0
+        marker.color.r = 0.0
+        marker.color.g = 1.0
+        return marker
+
+    def normalize_vector(self, vector):
+        """
+        Normalizes a vector to unit length.
+
+        Args:
+            vector (list or tuple): List or tuple representing the vector.
+
+        Returns:
+            list: A list representing the normalized vector.
+        """
+        magnitude = np.sqrt(sum(component ** 2 for component in vector))
+        normalized_vector = np.array([component / magnitude for component in vector])
+
+        return normalized_vector
+    
+    def create_normalized_vector(self, point1, point2):
+        v = point2 - point1
+        v = self.normalize_vector(v)
+        return v
 
 
     def create_ransac_plane(self, pose_dict):
@@ -230,7 +324,14 @@ class OptitrackCollector:
         self.num_added_objects += 1
         self.scene.add_box(box_name, box_pose, size)
 
-    def add_plane_to_planning_scene(self, n, )
+    def get_euclidean(self, p1, p2):
+        return np.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2)
+
+
+    def add_plane_to_planning_scene(self, n, d): 
+        # TODO: 
+        #  Create box for planning scene
+        pass
 
     #### Execution method ####
     def run(self):
@@ -247,6 +348,14 @@ class OptitrackCollector:
 
             if self.collection_completed and self.MODE == "points": 
                 if self.click == 4: 
+                    n, d = self.get_plane_eq()
+                    nn = self.normalize_vector(n)
+                    rospy.loginfo_once("Normal is: {}".format(n))
+                    rospy.loginfo_once("Normalized vector is: {}".format(nn))
+                    rospy.loginfo_once("d is: {}".format(d))
+                    rospy.loginfo_once("Adding defined ")
+                    self.collection_completed = False
+                    self.collection_enabled = False
 
 
 if __name__ == '__main__':
