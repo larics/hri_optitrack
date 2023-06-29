@@ -13,7 +13,6 @@ from shape_msgs.msg import SolidPrimitive  # Import the SolidPrimitive message
 from sensor_msgs.msg import Joy
 from std_srvs.srv import Trigger, TriggerResponse
 from visualization_msgs.msg import Marker
-from calc_utils import get_RotX, get_RotY, get_RotZ
 from scipy.spatial.transform import Rotation as R
 
 class OptitrackCollector:
@@ -64,8 +63,8 @@ class OptitrackCollector:
             self.group = moveit_commander.MoveGroupCommander(group_name)
             self.scene = moveit_commander.PlanningSceneInterface() # --> ns? 
 
-
         self.v1, self.v2, self.v3 = Marker(), Marker(), Marker()
+        self.visualize = True
 
 
         # TODO: Add visualization: 
@@ -90,6 +89,7 @@ class OptitrackCollector:
 
     def _init_publishers(self): 
         self.co_pub = rospy.Publisher("/collision_object", CollisionObject, queue_size=1)
+        self.visualization_pub = rospy.Publisher("/visualization_marker", Marker, queue_size=1)
 
     def _init_services(self): 
 
@@ -98,6 +98,8 @@ class OptitrackCollector:
     def init_pose_dict(self): 
         return {'position_x': [], 'position_y': [], 'position_z': []}
     
+    def clear_pose_dict(self): 
+        self.pose_dict = self.init_pose_dict()     
 
     def planning_scene_callback(self, msg): 
 
@@ -194,31 +196,45 @@ class OptitrackCollector:
             self.B = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
             self.o = copy.deepcopy(self.B)
             rospy.logdebug_once("First click, first point: {}".format(self.B))
+            self.clear_pose_dict()
         if self.click == 2:
             self.A = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
             self.a = copy.deepcopy(self.A)
             rospy.logdebug_once("Second click, second point: {}".format(self.A))
+            self.clear_pose_dict()
         if self.click == 3: 
             self.C = np.array([np.average(pose_dict['position_x']), np.average(pose_dict['position_y']), np.average(pose_dict['position_z'])])
             self.b = copy.deepcopy(self.C)
             rospy.logdebug_once("Third click, third point: {}".format(self.C))
+            self.clear_pose_dict()
+            self.click += 1
 
+        if self.click == 4:
+            width = self.get_euclidean(self.o, self.a)
+            length = self.get_euclidean(self.o, self.b)
 
-        width = self.get_euclidean(self.o, self.a)
-        length = self.get_euclidean(self.o, self.b)
+            # Really similar numbers?! Why? 
+            self.v1_ = self.a - self.o
+            self.v2_ = self.b - self.o
+            rospy.loginfo("self.a: {}".format(self.a))
+            rospy.loginfo("self.b: {}".format(self.b))
+            rospy.loginfo("self.o: {}".format(self.o))
+            rospy.loginfo("self.v1_: {}".format(self.v1_))
+            rospy.loginfo("self.v2_: {}".format(self.v2_))
 
-        self.v1_ = self.a - self.o
-        self.v2_ = self.b - self.o
-
-        if self.visualize: 
-            self.v1 = self.create_vector_marker(self.o, self.a)
-            self.v1_unit = self.get_unit_vector(self.v1_)
-            self.v1_quat = self.get_quaternion(self.v1_unit)
-            self.v2 = self.create_vector_marker(self.o, self.b)
-            self.v2_unit = self.get_unit_vector(self.v2_)
-            self.v2_quat = self.get_quaternion(self.v2_unit)
-
-
+            if self.visualize: 
+                self.v1_unit = self.get_unit_vector(self.v1_)
+                self.v1_quat = self.create_cs(self.v1_unit)
+                rospy.loginfo("self.v1_quat: {}".format(self.v1_quat))
+                #self.v1_quat = self.get_quaternion(self.v1_unit)
+                self.v2_unit = self.get_unit_vector(self.v2_)
+                self.v2_quat = self.create_cs(self.v2_unit)
+                rospy.loginfo("self.v2_quat: {}".format(self.v2_quat))
+                #self.v2_quat = self.get_quaternion(self.v2_unit)
+                v1_marker = self.create_vector_marker(self.o, self.v1_quat)
+                v2_marker = self.create_vector_marker(self.o, self.v2_quat)
+                self.visualization_pub.publish(v1_marker)
+                self.visualization_pub.publish(v2_marker)
         # TODO: Return origin and normal of the plane 
         # How to find origin of the plane (orientation of the plane)
 
@@ -228,8 +244,6 @@ class OptitrackCollector:
         p_y = self.create_normalized_vector(self.o, self.b)
         p_z = self.create_normalized_vector(np.cross(p_x, p_y))
         T_plane = np.matrix([p_x.T, p_y.T, p_z.T, self.o.T])
-        print(T_plane)
-
         # Get the normal of the plane
         #n = np.cross(self.B - self.A, self.C - self.B)
         # Get the equation of the plane ax + by + cz + d = 0
@@ -239,11 +253,19 @@ class OptitrackCollector:
     def get_unit_vector(self, vector): 
         return vector / np.linalg.norm(vector)
     
+    #def get_quaternion(self, vector)
+    
     def create_cs(self, vector): 
         a = vector 
-        b = self.matmul(get_RotZ(-90), a)
-        c = self.matmul(a, b)
-        R_ = np.matrix([a, b, c])
+        b = np.matmul(self.get_RotZ(-90), a)
+        c = np.cross(a, b)
+
+        rospy.logdebug("a: {}".format(a))
+        rospy.logdebug("b: {}".format(b))
+        rospy.logdebug("c: {}".format(c))
+
+        R_ = np.column_stack((a, b, c))
+        rospy.loginfo("R: {}".format(R_))
         r = R.from_matrix(R_)
         return r.as_quat()
     
@@ -255,9 +277,9 @@ class OptitrackCollector:
         marker.id = 0
         marker.type = Marker.ARROW
         marker.action = Marker.ADD
-        marker.pose.position.x = origin.x
-        marker.pose.position.y = origin.y
-        marker.pose.position.z = origin.z
+        marker.pose.position.x = origin[0]
+        marker.pose.position.y = origin[1]
+        marker.pose.position.z = origin[2]
         # How to transform x,y,z values to the orientation 
         marker.pose.orientation.x = quaternion[0]
         marker.pose.orientation.y = quaternion[1]
@@ -333,6 +355,15 @@ class OptitrackCollector:
         #  Create box for planning scene
         pass
 
+
+    def get_RotZ(self, angle): 
+        
+        RZ = np.array([[np.cos(angle), -np.sin(angle), 0],
+                       [np.sin(angle), np.cos(angle), 0], 
+                       [ 0, 0, 1]] )
+    
+        return RZ
+
     #### Execution method ####
     def run(self):
         # Run the node until it is shutdown
@@ -348,12 +379,13 @@ class OptitrackCollector:
 
             if self.collection_completed and self.MODE == "points": 
                 if self.click == 4: 
-                    n, d = self.get_plane_eq()
-                    nn = self.normalize_vector(n)
-                    rospy.loginfo_once("Normal is: {}".format(n))
-                    rospy.loginfo_once("Normalized vector is: {}".format(nn))
-                    rospy.loginfo_once("d is: {}".format(d))
-                    rospy.loginfo_once("Adding defined ")
+                    #break 
+                    #n, d = self.get_plane_eq()
+                    #nn = self.normalize_vector(n)
+                    #rospy.loginfo_once("Normal is: {}".format(n))
+                    #rospy.loginfo_once("Normalized vector is: {}".format(nn))
+                    #rospy.loginfo_once("d is: {}".format(d))
+                    #rospy.loginfo_once("Adding defined ")
                     self.collection_completed = False
                     self.collection_enabled = False
 
@@ -361,3 +393,4 @@ class OptitrackCollector:
 if __name__ == '__main__':
     collector = OptitrackCollector()
     collector.run()
+
